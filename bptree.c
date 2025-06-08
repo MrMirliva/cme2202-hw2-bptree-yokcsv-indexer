@@ -102,10 +102,10 @@ static char *str_dup(const char *s) {
  * Insert a Record into a node that is guaranteed not full.
  */
 static void insert_nonfull(BPNode *node, Record *rec) {
-    // Genel debug
+    /*// Genel debug
     fprintf(stderr,
         "DEBUG insert_nonfull: node=%p leaf=%d num_keys=%d rec_dept=\"%s\"\n",
-        (void*)node, node->is_leaf, node->num_keys, rec->department);
+        (void*)node, node->is_leaf, node->num_keys, rec->department);*/
 
     if (!node->is_leaf) {
         // İç düğüm: uygun çocuğa inmeden önce pos ve children kontrolü
@@ -114,7 +114,7 @@ static void insert_nonfull(BPNode *node, Record *rec) {
                strcmp(rec->department, node->keys[pos]) >= 0) {
             pos++;
         }
-        fprintf(stderr,
+        /*fprintf(stderr,
             "DEBUG nonleaf insert: pos=%d num_keys=%d children[%d]=%p\n",
             pos, node->num_keys, pos,
             (pos <= BP_DEGREE ? (void*)node->children[pos] : NULL));
@@ -123,7 +123,7 @@ static void insert_nonfull(BPNode *node, Record *rec) {
             fprintf(stderr,
                 "ERROR: invalid child at pos %d in non-leaf\n", pos);
             exit(1);
-        }
+        }*/
 
         BPNode *child = node->children[pos];
         // Taşma eşiğindeyse böl
@@ -224,4 +224,32 @@ UniListNode *search(BPNode *root, const char *department, int k) {
         ul = ul->next;
     }
     return ul;
+}
+
+void destroy_tree(BPNode *node) {
+    if (!node) return;
+
+    if (!node->is_leaf) {
+        // İç düğüm: tüm çocukları serbest et
+        for (int i = 0; i <= node->num_keys; i++) {
+            destroy_tree(node->children[i]);
+        }
+    } else {
+        // Yaprak: her anahtarın UniList’ini serbest et
+        for (int i = 0; i < node->num_keys; i++) {
+            UniListNode *u = node->ulist[i];
+            while (u) {
+                UniListNode *tmp = u;
+                u = u->next;
+                free(tmp->university);
+                free(tmp);
+            }
+        }
+    }
+
+    // Ortak: node->keys dizisindeki bölümleri serbest et
+    for (int i = 0; i < node->num_keys; i++) {
+        free(node->keys[i]);
+    }
+    free(node);
 }

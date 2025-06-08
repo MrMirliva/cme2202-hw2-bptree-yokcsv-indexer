@@ -36,4 +36,6 @@ void insert_sequential(BPNode **root, Record *rec);
 // Returns NULL if department not found or fewer than k entries
 UniListNode *search(BPNode *root, const char *department, int k);
 
+void destroy_tree(BPNode *root);
+
 #endif // BPTREE_H

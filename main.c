@@ -1,39 +1,33 @@
-// main.c
-
 #include <stdio.h>
+#include <stdlib.h>      // ← burayı ekliyoruz
+#include "external_sort.h"
 #include "record.h"
 #include "bptree.h"
 
 int main(void) {
-    // 1) Kayıtları oku
-    size_t n;
-    Record *recs = read_records("yok_atlas.csv", &n);
-    if (!recs) return 1;
-    printf("Read %zu records from yok_atlas.csv\n", n);
+    printf("1) external_sort çağrılıyor...\n");
+    char *sorted = external_sort("yok_atlas.csv");
+    printf("1) external_sort bitti, dosya: %s\n", sorted);
 
-    // 2) Ağacı kur
+    printf("2) read_records çağrılıyor...\n");
+    size_t n;
+    Record *recs = read_records(sorted, &n);
+    printf("2) read_records tamamlandı, n = %zu, recs = %p\n", n, (void*)recs);
+    if (!recs) return 1;
+
+    printf("3) Ağaç inşasına geçiliyor...\n");
     BPNode *root = NULL;
     for (size_t i = 0; i < n; i++) {
         insert_sequential(&root, &recs[i]);
     }
-    printf("Tree built. Root num_keys = %d\n", root->num_keys);
+    printf("3) Ağaç oluşturuldu, root->num_keys = %d\n", root->num_keys);
 
-    // 3) Örnek aramalar
-    const char *dept = "Gastronomi ve Mutfak Sanatlari";
-    for (int k = 1; k <= 2; k++) {
-        UniListNode *u = search(root, dept, k);
-        if (u) {
-            printf("%d%s university in \"%s\": %s (%.2f)\n",
-                   k, k==1?"st":(k==2?"nd":"th"),
-                   dept, u->university, u->score);
-        } else {
-            printf("%d%s university in \"%s\": not found\n", k,
-                   k==1?"st":(k==2?"nd":"th"), dept);
-        }
-    }
+    // örnek arama
+    UniListNode *u = search(root, "Gastronomi ve Mutfak Sanatlari", 2);
+    if (u) printf("2. sıra üniversite: %s (%.2f)\n", u->university, u->score);
+    else   printf("Arama bulunamadı.\n");
 
-    // 4) Temizlik
-    destroy_tree(root);
     free_records(recs, n);
+    free(sorted);
     return 0;
 }

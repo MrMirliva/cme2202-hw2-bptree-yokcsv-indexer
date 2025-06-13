@@ -23,6 +23,7 @@ typedef struct BPNode {
     char *keys[BP_DEGREE - 1];               // up to BP_DEGREE–1 department names
     struct BPNode *children[BP_DEGREE + 1];  // up to BP_DEGREE+1 child pointers
     struct BPNode *next;                     // leaf-to-leaf linked list
+    struct BPNode *prev;                     // leaf-to-leaf linked list
     UniListNode *ulist[BP_DEGREE - 1];       // for each key in a leaf, pointer to its UniList
 } BPNode;
 

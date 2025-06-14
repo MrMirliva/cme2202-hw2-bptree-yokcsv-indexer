@@ -8,38 +8,34 @@
 #define INITIAL_CAPACITY 16
 #define LINE_BUF_SIZE   1024
 
+// Güvenli strdup: malloc başarısızsa NULL döner
 static char *strdup_safe(const char *s) {
-    char *dup = malloc(strlen(s) + 1);
+    if (!s) return NULL;
+    size_t len = strlen(s) + 1;
+    char *dup = malloc(len);
     if (dup) {
-        strcpy(dup, s);
+        memcpy(dup, s, len);
     }
     return dup;
 }
 
-/**
- * Reads all records from a CSV file (expects header on first line).
- * @param filename   path to CSV file
- * @param out_count  pointer to size_t that will receive number of records
- * @return pointer to dynamically-allocated array of Record; NULL on error.
- *   Caller is responsible for freeing both the array and all Record fields.
- */
 Record *read_records(const char *filename, size_t *out_count) {
     FILE *fp = fopen(filename, "r");
     if (!fp) {
-        perror("Failed to open CSV");
+        perror(filename);
         return NULL;
     }
 
+    // Başlık satırını atla
     char line[LINE_BUF_SIZE];
-    // Skip header line
     if (!fgets(line, sizeof(line), fp)) {
         fclose(fp);
         return NULL;
     }
 
     size_t capacity = INITIAL_CAPACITY;
-    size_t count = 0;
-    Record *arr = malloc(capacity * sizeof(Record));
+    size_t count    = 0;
+    Record *arr     = malloc(capacity * sizeof *arr);
     if (!arr) {
         perror("malloc");
         fclose(fp);
@@ -47,35 +43,37 @@ Record *read_records(const char *filename, size_t *out_count) {
     }
 
     while (fgets(line, sizeof(line), fp)) {
-        // Remove trailing newline
+        // Satır sonu karakterlerini temizle
         line[strcspn(line, "\r\n")] = '\0';
 
-        // Tokenize on commas
-        char *tok = strtok(line, ",");
-        if (!tok) continue;
+        // 4 alan bekliyoruz: id,university,department,score
         char *fields[4];
-        int i = 0;
-        for (; tok && i < 4; ++i) {
-            fields[i] = tok;
+        size_t i = 0;
+        char *tok = strtok(line, ",");
+        while (tok && i < 4) {
+            fields[i++] = tok;
             tok = strtok(NULL, ",");
         }
         if (i != 4) {
-            fprintf(stderr, "Malformed line (expected 4 fields): %s\n", line);
+            fprintf(stderr, "Malformed line (4 fields expected): %s\n", line);
             continue;
         }
 
-        // Expand array if needed
+        // Gerekirse dizi boyutunu iki katına çıkar
         if (count == capacity) {
-            capacity *= 2;
-            Record *tmp = realloc(arr, capacity * sizeof(Record));
+            size_t new_cap = capacity * 2;
+            Record *tmp = realloc(arr, new_cap * sizeof *arr);
             if (!tmp) {
                 perror("realloc");
-                break;
+                free_records(arr, count);
+                fclose(fp);
+                return NULL;
             }
             arr = tmp;
+            capacity = new_cap;
         }
 
-        // Populate Record
+        // Kaydı doldur
         arr[count].id         = strdup_safe(fields[0]);
         arr[count].university = strdup_safe(fields[1]);
         arr[count].department = strdup_safe(fields[2]);
@@ -84,15 +82,19 @@ Record *read_records(const char *filename, size_t *out_count) {
     }
 
     fclose(fp);
+
+    // Fazladan ayrılan belleği geri kes (opsiyonel)
+    if (count < capacity) {
+        Record *tmp = realloc(arr, count * sizeof *arr);
+        if (tmp) {
+            arr = tmp;
+        }
+    }
+
     *out_count = count;
     return arr;
 }
 
-/**
- * Frees the array of Record structs and all internal strings.
- * @param arr    Pointer to the Record array
- * @param count  Number of records in the array
- */
 void free_records(Record *arr, size_t count) {
     if (!arr) return;
     for (size_t i = 0; i < count; ++i) {

@@ -4,216 +4,293 @@
 #include <string.h>
 #include <stdio.h>
 #include "bptree.h"
+#include "record.h"   // Record tipi için
 
-// Helper to duplicate a key string
+// Yardımcı struct: her departmana karşılık gelen uni-list başı
+typedef struct {
+    const char *dept;
+    UniListNode *ulist;
+} DeptEntry;
+
+size_t g_split_count = 0;
+size_t g_memory_usage_bytes = 0;
+
+// String duplicate + bellek sayaç
 static char *key_dup(const char *s) {
     if (!s) return NULL;
-    char *d = malloc(strlen(s) + 1);
-    return d ? strcpy(d, s) : NULL;
+    size_t sz = strlen(s) + 1;
+    char *d = malloc(sz);
+    if (!d) { perror("malloc"); exit(1); }
+    memcpy(d, s, sz);
+    g_memory_usage_bytes += sz;
+    return d;
 }
 
 BPNode *create_node(int is_leaf) {
-    BPNode *node = malloc(sizeof(BPNode));
-    if (!node) return NULL;
-    node->is_leaf = is_leaf;
-    node->num_keys = 0;
-    node->next = NULL;
-    node->prev = NULL;
-    // Anahtar ve ikincil liste göstericilerini NULL’la
+    BPNode *n = malloc(sizeof *n);
+    if (!n) { perror("malloc"); exit(1); }
+    g_memory_usage_bytes += sizeof *n;
+    n->is_leaf = is_leaf;
+    n->num_keys = 0;
+    n->next = n->prev = NULL;
     for (int i = 0; i < BP_DEGREE - 1; i++) {
-        node->keys[i]  = NULL;
-        node->ulist[i] = NULL;
+        n->keys[i]  = NULL;
+        n->ulist[i] = NULL;
     }
-    // Çocuk işaretçilerini NULL’la
     for (int i = 0; i < BP_DEGREE + 1; i++) {
-        node->children[i] = NULL;
+        n->children[i] = NULL;
     }
-    return node;
+    return n;
 }
 
-void split_node(BPNode *parent, int i) {
-    BPNode *child    = parent->children[i];
-    BPNode *new_node = create_node(child->is_leaf);
-    int orig = child->num_keys;
-    int t    = orig / 2;
+// node->children[idx] düğümünü bölüp parent'a yeni sibling ekler
+static void split_node(BPNode *parent, int idx) {
+    g_split_count++;
+    BPNode *child = parent->children[idx];
+    BPNode *sib   = create_node(child->is_leaf);
+    int t = child->num_keys / 2;
 
     if (child->is_leaf) {
-        // Yaprak bölme
-        new_node->num_keys = orig - t;
-        for (int j = 0; j < new_node->num_keys; ++j) {
-            new_node->keys[j]  = child->keys[j + t];
-            new_node->ulist[j] = child->ulist[j + t];
+        // leaf bölme
+        sib->num_keys = child->num_keys - t;
+        for (int j = 0; j < sib->num_keys; j++) {
+            sib->keys[j]  = child->keys[j + t];
+            sib->ulist[j] = child->ulist[j + t];
             child->keys[j + t]  = NULL;
             child->ulist[j + t] = NULL;
         }
         child->num_keys = t;
-
-        // Çift yönlü leaf zinciri
-        new_node->next = child->next;
-        new_node->prev = child;
-        if (child->next) child->next->prev = new_node;
-        child->next = new_node;
-
-        // Parent’ın children ve keys dizilerini kaydır, ekle
-        for (int j = parent->num_keys; j > i; --j)
-            parent->children[j + 1] = parent->children[j];
-        parent->children[i + 1] = new_node;
-
-        for (int j = parent->num_keys; j > i; --j)
-            parent->keys[j] = parent->keys[j - 1];
-        parent->keys[i] = key_dup(new_node->keys[0]);
+        // zincir
+        sib->next = child->next;
+        if (sib->next) sib->next->prev = sib;
+        child->next = sib;
+        sib->prev  = child;
+        // parent güncelle
+        for (int j = parent->num_keys; j > idx; j--)
+            parent->children[j+1] = parent->children[j];
+        parent->children[idx+1] = sib;
+        for (int j = parent->num_keys; j > idx; j--)
+            parent->keys[j] = parent->keys[j-1];
+        parent->keys[idx] = key_dup(sib->keys[0]);
         parent->num_keys++;
-    } else {
-        // İç düğüm bölme
-        char *promoted = child->keys[t];
 
-        // Sağ düğüme kalan anahtarları ve çocuk işaretçilerini taşı
-        new_node->num_keys = orig - t - 1;
-        for (int j = 0; j < new_node->num_keys; ++j) {
-            new_node->keys[j]     = child->keys[j + t + 1];
-            new_node->children[j] = child->children[j + t + 1];
+    } else {
+        // internal split
+        char *mid = child->keys[t];
+        sib->num_keys = child->num_keys - t - 1;
+        for (int j = 0; j < sib->num_keys; j++) {
+            sib->keys[j]      = child->keys[j + t + 1];
+            sib->children[j]  = child->children[j + t + 1];
             child->keys[j + t + 1]     = NULL;
             child->children[j + t + 1] = NULL;
         }
-        // Son (t+1). çocuk da new_node’a geçmeli
-        new_node->children[new_node->num_keys] = child->children[orig];
-        child->children[orig]                  = NULL;
-
+        sib->children[sib->num_keys] = child->children[child->num_keys];
         child->num_keys = t;
-
-        // Parent’ın children ve keys dizilerini kaydır, ekle
-        for (int j = parent->num_keys; j > i; --j) {
+        for (int j = parent->num_keys; j > idx; j--) {
+            parent->keys[j]       = parent->keys[j-1];
             parent->children[j+1] = parent->children[j];
-            parent->keys[j]       = parent->keys[j - 1];
         }
-        parent->children[i + 1] = new_node;
-        parent->keys[i]         = promoted;
+        parent->keys[idx]       = mid;
+        parent->children[idx+1] = sib;
         parent->num_keys++;
     }
 }
 
-// String duplication helper
-static char *str_dup(const char *s) {
-    if (!s) return NULL;
-    char *d = malloc(strlen(s) + 1);
-    return d ? strcpy(d, s) : NULL;
-}
-
-/**
- * Insert a Record into a node that is guaranteed not full.
- */
-static void insert_nonfull(BPNode *node, Record *rec) {
-    if (!node->is_leaf) {
-        // İç düğüm: uygun çocuğa in
-        int pos = 0;
-        while (pos < node->num_keys &&
-               strcmp(rec->department, node->keys[pos]) >= 0)
-            pos++;
-        BPNode *child = node->children[pos];
-        if (child->num_keys == BP_DEGREE - 1) {
-            split_node(node, pos);
-            if (strcmp(rec->department, node->keys[pos]) > 0)
-                pos++;
+// insert_sequential içinde kullanılıyor
+static void insert_nonfull(BPNode *n, Record *r) {
+    if (!n->is_leaf) {
+        int i = 0;
+        while (i < n->num_keys && strcmp(r->department, n->keys[i]) >= 0) i++;
+        BPNode *c = n->children[i];
+        if (c->num_keys == BP_DEGREE-1) {
+            split_node(n, i);
+            if (strcmp(r->department, n->keys[i]) > 0) i++;
         }
-        insert_nonfull(node->children[pos], rec);
+        insert_nonfull(n->children[i], r);
     } else {
-        // Yaprak düğüm ekleme
-        int pos = 0;
-        while (pos < node->num_keys &&
-               strcmp(node->keys[pos], rec->department) < 0)
-            pos++;
-        // Aynı bölüm varsa listeye ekle
-        if (pos < node->num_keys &&
-            strcmp(node->keys[pos], rec->department) == 0) {
-            UniListNode *newUL = malloc(sizeof(UniListNode));
-            newUL->university = str_dup(rec->university);
-            newUL->score      = rec->score;
-            UniListNode **pp  = &node->ulist[pos];
-            while (*pp && (*pp)->score > rec->score)
-                pp = &(*pp)->next;
-            newUL->next = *pp;
-            *pp         = newUL;
-        }
-        // Yeni bölümse anahtar ve liste düğümü ekle
-        else {
-            for (int j = node->num_keys; j > pos; j--) {
-                node->keys[j]  = node->keys[j - 1];
-                node->ulist[j] = node->ulist[j - 1];
+        int i = 0;
+        while (i < n->num_keys && strcmp(n->keys[i], r->department) < 0) i++;
+        if (i < n->num_keys && strcmp(n->keys[i], r->department) == 0) {
+            // Mevcut departmana ekle
+            UniListNode *u = malloc(sizeof *u);
+            if (!u) { perror("malloc"); exit(1); }
+            g_memory_usage_bytes += sizeof *u;
+            u->university = key_dup(r->university);
+            u->score      = r->score;
+            UniListNode **pp = &n->ulist[i];
+            while (*pp && (*pp)->score > r->score) pp = &(*pp)->next;
+            u->next = *pp; *pp = u;
+        } else {
+            // Yeni departman anahtar ekle
+            for (int j = n->num_keys; j > i; j--) {
+                n->keys[j]  = n->keys[j-1];
+                n->ulist[j] = n->ulist[j-1];
             }
-            node->keys[pos] = str_dup(rec->department);
-            UniListNode *newUL = malloc(sizeof(UniListNode));
-            newUL->university  = str_dup(rec->university);
-            newUL->score       = rec->score;
-            newUL->next        = NULL;
-            node->ulist[pos]   = newUL;
-            node->num_keys++;
+            n->keys[i] = key_dup(r->department);
+            UniListNode *u = malloc(sizeof *u);
+            if (!u) { perror("malloc"); exit(1); }
+            g_memory_usage_bytes += sizeof *u;
+            u->university = key_dup(r->university);
+            u->score      = r->score;
+            u->next       = NULL;
+            n->ulist[i]   = u;
+            n->num_keys++;
         }
     }
 }
 
-/**
- * Main insertion entry: handles root split if necessary,
- * then delegates to insert_nonfull().
- */
-void insert_sequential(BPNode **root, Record *rec) {
-    if (*root == NULL) {
-        *root = create_node(1);
-    }
-    BPNode *r = *root;
-    if (r->num_keys == BP_DEGREE - 1) {
+void insert_sequential(BPNode **root, Record *r) {
+    if (!*root) *root = create_node(1);
+    BPNode *rt = *root;
+    if (rt->num_keys == BP_DEGREE-1) {
         BPNode *s = create_node(0);
-        s->children[0] = r;
+        s->children[0] = rt;
         *root = s;
         split_node(s, 0);
-        insert_nonfull(s, rec);
+        insert_nonfull(s, r);
     } else {
-        insert_nonfull(r, rec);
+        insert_nonfull(rt, r);
     }
 }
 
-UniListNode *search(BPNode *root, const char *department, int k) {
-    BPNode *cur = root;
-    // 1) İç düğümlerde uygun çocuğa in
-    while (cur && !cur->is_leaf) {
-        int pos = 0;
-        while (pos < cur->num_keys &&
-               strcmp(department, cur->keys[pos]) >= 0)
-            pos++;
-        cur = cur->children[pos];
+void bulk_load(BPNode **root, Record *recs, size_t n) {
+    // Sayaçları sıfırla
+    g_split_count        = 0;
+    g_memory_usage_bytes = 0;
+
+    // 1) Önceki ağaç varsa temizle
+    if (*root) {
+        destroy_tree(*root);
+        *root = NULL;
     }
-    if (!cur) return NULL;
 
-    // 2) Yaprakta bölüm anahtarını bul
-    int pos = 0;
-    while (pos < cur->num_keys &&
-           strcmp(department, cur->keys[pos]) != 0)
-        pos++;
-    if (pos == cur->num_keys) return NULL;
+    // Aşama 1: Farklı departman sayısı
+    size_t D = 0;
+    for (size_t i = 0; i < n; ) {
+        D++; size_t j = i+1;
+        while (j < n && strcmp(recs[j].department, recs[i].department)==0) j++;
+        i = j;
+    }
+    DeptEntry *deps = malloc(D * sizeof *deps);
+    if (!deps) { perror("malloc"); exit(1); }
 
-    // 3) İkincil listeyi k kez ileri sar
-    UniListNode *ul = cur->ulist[pos];
-    while (ul && --k > 0)
-        ul = ul->next;
-    return ul;
+    // DeptEntry doldur
+    size_t di = 0;
+    for (size_t i = 0; i < n; ) {
+        deps[di].dept  = recs[i].department;
+        deps[di].ulist = NULL;
+        UniListNode *tail = NULL;
+        size_t j = i;
+        while (j < n && strcmp(recs[j].department, recs[i].department)==0) {
+            UniListNode *u = malloc(sizeof *u);
+            if (!u) { perror("malloc"); exit(1); }
+            g_memory_usage_bytes += sizeof *u;
+            u->university = key_dup(recs[j].university);
+            u->score      = recs[j].score;
+            u->next       = NULL;
+            if (!deps[di].ulist) deps[di].ulist = u;
+            else tail->next = u;
+            tail = u; j++;
+        }
+        di++; i = j;
+    }
+
+    // Aşama 2: Yapraklar
+    size_t leafCap   = BP_DEGREE - 1;
+    size_t leafCount = (D + leafCap - 1) / leafCap;
+    BPNode **level   = malloc(leafCount * sizeof *level);
+    if (!level) { perror("malloc"); exit(1); }
+
+    for (size_t li=0; li<leafCount; li++) {
+        BPNode *leaf = create_node(1);
+        size_t start = li*leafCap, end = start+leafCap;
+        if (end> D) end = D;
+        for (size_t k=start; k<end; k++) {
+            size_t idx = k-start;
+            leaf->keys[idx]  = key_dup(deps[k].dept);
+            leaf->ulist[idx] = deps[k].ulist;
+            leaf->num_keys++;
+        }
+        if (li>0) {
+            level[li-1]->next = leaf;
+            leaf->prev        = level[li-1];
+        }
+        level[li] = leaf;
+    }
+    free(deps);
+
+    // Aşama 3: İç düğümler
+    size_t lvlCount = leafCount, group = BP_DEGREE;
+    while (lvlCount>1) {
+        size_t newCount = (lvlCount+group-1)/group;
+        BPNode **nextLvl = malloc(newCount * sizeof *nextLvl);
+        if (!nextLvl) { perror("malloc"); exit(1); }
+        for (size_t i=0; i<newCount; i++) {
+            BPNode *node = create_node(0);
+            size_t start=i*group, end=start+group;
+            if (end>lvlCount) end=lvlCount;
+            for (size_t j=start; j<end; j++) {
+                size_t ci=j-start;
+                node->children[ci] = level[j];
+                if (ci>0) node->keys[ci-1] = key_dup(level[j]->keys[0]);
+            }
+            node->num_keys = (end-start)-1;
+            nextLvl[i] = node;
+        }
+        free(level);
+        level = nextLvl;
+        lvlCount = newCount;
+    }
+
+    // Aşama 4: Kök
+    *root = level[0];
+    free(level);
 }
 
-void destroy_tree(BPNode *node) {
-    if (!node) return;
-    if (!node->is_leaf) {
-        for (int i = 0; i <= node->num_keys; i++)
-            destroy_tree(node->children[i]);
+UniListNode *search(BPNode *root, const char *dept, int k) {
+    BPNode *c = root;
+    while (c && !c->is_leaf) {
+        int i=0;
+        while (i<c->num_keys && strcmp(dept,c->keys[i])>=0) i++;
+        c = c->children[i];
+    }
+    if (!c) return NULL;
+    int i=0;
+    while (i<c->num_keys && strcmp(dept,c->keys[i])!=0) i++;
+    if (i==c->num_keys) return NULL;
+    UniListNode *u = c->ulist[i];
+    while (u && --k>0) u=u->next;
+    return u;
+}
+
+int tree_height(BPNode *root) {
+    int h=0;
+    BPNode *c=root;
+    while (c) {
+        h++;
+        if (c->is_leaf) break;
+        c = c->children[0];
+    }
+    return h;
+}
+
+void destroy_tree(BPNode *n) {
+    if (!n) return;
+    if (!n->is_leaf) {
+        for (int i=0; i<=n->num_keys; i++)
+            destroy_tree(n->children[i]);
     } else {
-        for (int i = 0; i < node->num_keys; i++) {
-            UniListNode *u = node->ulist[i];
+        for (int i=0; i<n->num_keys; i++) {
+            UniListNode *u = n->ulist[i];
             while (u) {
-                UniListNode *tmp = u;
+                UniListNode *t = u;
                 u = u->next;
-                free(tmp->university);
-                free(tmp);
+                free(t->university);
+                free(t);
             }
         }
     }
-    for (int i = 0; i < node->num_keys; i++)
-        free(node->keys[i]);
-    free(node);
+    for (int i=0; i<n->num_keys; i++)
+        free(n->keys[i]);
+    free(n);
 }

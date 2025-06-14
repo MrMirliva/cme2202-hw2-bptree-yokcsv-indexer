@@ -5,6 +5,13 @@
 
 #include <stddef.h>
 
+/**
+ * Tek bir CSV kaydını temsil eder.
+ * - id: Bölüm sırası (UUID olarak)
+ * - university: Üniversite adı
+ * - department: Bölüm adı
+ * - score: Yerleştirme puanı
+ */
 typedef struct {
     char *id;           // e.g. "1"
     char *university;   // e.g. "YEDITEPE UNIVERSITESI"
@@ -13,18 +20,18 @@ typedef struct {
 } Record;
 
 /**
- * Reads all records from a CSV file (expects header on first line).
- * @param filename   path to CSV file
- * @param out_count  pointer to size_t that will receive number of records
- * @return pointer to dynamically-allocated array of Record; NULL on error.
- *   Caller is responsible for freeing both the array and all Record fields.
+ * CSV dosyasını satır satır okuyup dinamik bir Record dizisi oluşturur.
+ * @param filename   CSV dosya yolu
+ * @param out_count  Kayıt sayısını alacak pointer
+ * @return Oluşturulan Record dizisi veya NULL (hata durumunda).
+ *   Dönen diziyi ve içindeki stringleri free_records ile temizleyin.
  */
 Record *read_records(const char *filename, size_t *out_count);
 
 /**
- * Frees the array of Record structs and all internal strings.
- * @param arr    Pointer to the Record array
- * @param count  Number of records in the array
+ * read_records ile oluşturulan Record dizisini ve içindeki stringleri serbest bırakır.
+ * @param arr    Record dizisi
+ * @param count  Dizideki kayıt sayısı
  */
 void free_records(Record *arr, size_t count);
 

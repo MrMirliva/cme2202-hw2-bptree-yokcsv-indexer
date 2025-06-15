@@ -1,5 +1,3 @@
-// main.c
-
 #define _POSIX_C_SOURCE 199309L
 #include <time.h>
 #include <stdio.h>
@@ -11,7 +9,30 @@
 #include "external_sort.h"
 
 int main(int argc, char *argv[]) {
-    const char *in_csv = (argc > 1 ? argv[1] : "yok_atlas.csv");
+    // 3 argüman: <csv_file> <1|2> <order>
+    if (argc != 4) {
+        fprintf(stderr,
+            "Usage: %s <csv_file> <1|2> <order>\n"
+            "  <csv_file> : Input CSV file\n"
+            "  1          : Sequential Insertion\n"
+            "  2          : Bottom-up Bulk Load\n"
+            "  <order>    : B+ tree order (>=3)\n",
+            argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    const char *in_csv = argv[1];
+    int choice         = atoi(argv[2]);
+    bp_degree          = atoi(argv[3]);
+
+    if (choice != 1 && choice != 2) {
+        fprintf(stderr, "Error: Invalid load method: %d\n", choice);
+        return EXIT_FAILURE;
+    }
+    if (bp_degree < 3) {
+        fprintf(stderr, "Error: order must be at least 3 (got %d)\n", bp_degree);
+        return EXIT_FAILURE;
+    }
 
     // 1) CSV’i dışsal sıralayıp yeni dosya adını al
     char *sorted_csv = external_sort(in_csv);
@@ -31,31 +52,15 @@ int main(int argc, char *argv[]) {
     }
     printf("Read %zu records from %s\n\n", n, sorted_csv);
 
-    // 3) Yükleme yöntemi seçimi
-    int choice = 0;
-    printf("Select B+ Tree load method:\n"
-           "  1) Sequential Insertion\n"
-           "  2) Bottom-up Bulk Load\n"
-           "Enter choice (1 or 2): ");
-    if (scanf("%d", &choice) != 1 || (choice != 1 && choice != 2)) {
-        fprintf(stderr, "Invalid choice\n");
-        free_records(recs, n);
-        free(sorted_csv);
-        return EXIT_FAILURE;
-    }
-    // Satır okuma tamponunu boşalt
-    while (getchar() != '\n');
-
-    // Zamanlama ve ölçümler için değişkenler
+    // 3) Ağacı kur ve ölç
     struct timespec t0, t1;
     BPNode *root = NULL;
     double elapsed;
     int height;
     size_t splits, mem;
 
-    // 4) Seçilene göre ağacı kur ve ölç
     if (choice == 1) {
-        // Sequential
+        // Sequential Insertion
         g_split_count = 0;
         g_memory_usage_bytes = 0;
         clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -63,32 +68,29 @@ int main(int argc, char *argv[]) {
             insert_sequential(&root, &recs[i]);
         }
         clock_gettime(CLOCK_MONOTONIC, &t1);
-        elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec)/1e9;
-        height = tree_height(root);
-        splits = g_split_count;
-        mem    = g_memory_usage_bytes;
         printf("\n[Sequential Insertion]\n");
     } else {
-        // Bulk
+        // Bottom-up Bulk Load
         g_split_count = 0;
         g_memory_usage_bytes = 0;
         clock_gettime(CLOCK_MONOTONIC, &t0);
         bulk_load(&root, recs, n);
         clock_gettime(CLOCK_MONOTONIC, &t1);
-        elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec)/1e9;
-        height = tree_height(root);
-        splits = g_split_count;  // should be 0
-        mem    = g_memory_usage_bytes;
         printf("\n[Bottom-up Bulk Load]\n");
     }
 
-    // 5) Metrikleri yazdır
+    elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec)/1e9;
+    height  = tree_height(root);
+    splits  = g_split_count;
+    mem     = g_memory_usage_bytes;
+
+    // 4) Metrikleri yazdır
     printf("Build Time   : %.6f s\n", elapsed);
     printf("Tree Height  : %d\n",      height);
     printf("Split Count  : %zu\n",     splits);
     printf("Memory Usage : %zu bytes\n\n", mem);
 
-    // 6) Etkileşimli arama
+    // 5) Etkileşimli arama
     char dept_buf[256];
     int k;
     printf("Enter department name (exact): ");
@@ -110,7 +112,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // Arama süresini ölç
     clock_gettime(CLOCK_MONOTONIC, &t0);
     UniListNode *u = search(root, dept_buf, k);
     clock_gettime(CLOCK_MONOTONIC, &t1);
@@ -123,11 +124,13 @@ int main(int argc, char *argv[]) {
                dept_buf, u->university, u->score);
     } else {
         printf("\nNot found: %d%s university in \"%s\"\n",
-               k, (k == 1 ? "st" : (k == 2 ? "nd" : "th")), dept_buf);
+               k,
+               (k == 1 ? "st" : (k == 2 ? "nd" : "th")),
+               dept_buf);
     }
     printf("Search Time  : %.9f s\n", search_time);
 
-    // 7) Temizlik
+    // 6) Temizlik
     destroy_tree(root);
     free_records(recs, n);
     free(sorted_csv);

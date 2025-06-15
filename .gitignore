@@ -56,4 +56,4 @@ dkms.conf
 *.txt
 *.csv
 
-bptree
+bptree_app

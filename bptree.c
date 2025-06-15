@@ -26,6 +26,31 @@ static char *key_dup(const char *s) {
     return d;
 }
 
+// bptree.c içinde, diğer static fonksiyonların yanına
+static BPNode *find_leaf(BPNode *root, const char *key) {
+    BPNode *c = root;
+    int level = 0;
+    while (c && !c->is_leaf) {
+        // 1) Bu seviyedeki anahtarları bas
+        printf("[DEBUG] Level %d keys:", level);
+        for (int i = 0; i < c->num_keys; i++)
+            printf(" '%s'", c->keys[i]);
+        printf("\n");
+
+        // 2) Hangi child’a iniyor?
+        int i = 0;
+        while (i < c->num_keys && strcmp(key, c->keys[i]) >= 0) i++;
+        printf("[DEBUG] Level %d choose child index = %d\n", level, i);
+
+        c = c->children[i];
+        level++;
+    }
+    printf("[DEBUG] Reached leaf at level %d with num_keys=%d\n",
+           level, c ? c->num_keys : -1);
+    return c;
+}
+
+
 BPNode *create_node(int is_leaf) {
     BPNode *n = malloc(sizeof *n);
     if (!n) { perror("malloc"); exit(1); }
@@ -167,8 +192,8 @@ void bulk_load(BPNode **root, Record *recs, size_t n) {
     // Aşama 1: Farklı departman sayısı
     size_t D = 0;
     for (size_t i = 0; i < n; ) {
-        D++; size_t j = i+1;
-        while (j < n && strcmp(recs[j].department, recs[i].department)==0) j++;
+        D++; size_t j = i + 1;
+        while (j < n && strcmp(recs[j].department, recs[i].department) == 0) j++;
         i = j;
     }
     DeptEntry *deps = malloc(D * sizeof *deps);
@@ -181,7 +206,7 @@ void bulk_load(BPNode **root, Record *recs, size_t n) {
         deps[di].ulist = NULL;
         UniListNode *tail = NULL;
         size_t j = i;
-        while (j < n && strcmp(recs[j].department, recs[i].department)==0) {
+        while (j < n && strcmp(recs[j].department, recs[i].department) == 0) {
             UniListNode *u = malloc(sizeof *u);
             if (!u) { perror("malloc"); exit(1); }
             g_memory_usage_bytes += sizeof *u;
@@ -190,9 +215,16 @@ void bulk_load(BPNode **root, Record *recs, size_t n) {
             u->next       = NULL;
             if (!deps[di].ulist) deps[di].ulist = u;
             else tail->next = u;
-            tail = u; j++;
+            tail = u;
+            j++;
         }
         di++; i = j;
+    }
+
+    // (Opsiyonel debug)
+    printf("[DEBUG] Distinct D = %zu\n", D);
+    for (size_t x = 0; x < D; x++) {
+        printf("  deps[%zu] = '%s'\n", x, deps[x].dept);
     }
 
     // Aşama 2: Yapraklar
@@ -201,50 +233,74 @@ void bulk_load(BPNode **root, Record *recs, size_t n) {
     BPNode **level   = malloc(leafCount * sizeof *level);
     if (!level) { perror("malloc"); exit(1); }
 
-    for (size_t li=0; li<leafCount; li++) {
+    for (size_t li = 0; li < leafCount; li++) {
         BPNode *leaf = create_node(1);
-        size_t start = li*leafCap, end = start+leafCap;
-        if (end> D) end = D;
-        for (size_t k=start; k<end; k++) {
-            size_t idx = k-start;
+        size_t start = li * leafCap, end = start + leafCap;
+        if (end > D) end = D;
+        for (size_t k = start; k < end; k++) {
+            size_t idx = k - start;
             leaf->keys[idx]  = key_dup(deps[k].dept);
             leaf->ulist[idx] = deps[k].ulist;
             leaf->num_keys++;
         }
-        if (li>0) {
-            level[li-1]->next = leaf;
-            leaf->prev        = level[li-1];
+        if (li > 0) {
+            level[li - 1]->next = leaf;
+            leaf->prev          = level[li - 1];
         }
         level[li] = leaf;
     }
     free(deps);
 
-    // Aşama 3: İç düğümler
+    // Aşama 3: İç düğümler (düzeltilmiş)
     size_t lvlCount = leafCount, group = BP_DEGREE;
-    while (lvlCount>1) {
-        size_t newCount = (lvlCount+group-1)/group;
+    while (lvlCount > 1) {
+        size_t newCount  = (lvlCount + group - 1) / group;
         BPNode **nextLvl = malloc(newCount * sizeof *nextLvl);
         if (!nextLvl) { perror("malloc"); exit(1); }
-        for (size_t i=0; i<newCount; i++) {
+
+        for (size_t i = 0; i < newCount; i++) {
             BPNode *node = create_node(0);
-            size_t start=i*group, end=start+group;
-            if (end>lvlCount) end=lvlCount;
-            for (size_t j=start; j<end; j++) {
-                size_t ci=j-start;
-                node->children[ci] = level[j];
-                if (ci>0) node->keys[ci-1] = key_dup(level[j]->keys[0]);
+            size_t start = i * group, end = start + group;
+            if (end > lvlCount) end = lvlCount;
+
+            // 1) Çocuk pointer’lar
+            for (size_t j = start; j < end; j++) {
+                node->children[j - start] = level[j];
             }
-            node->num_keys = (end-start)-1;
-            nextLvl[i] = node;
+
+            // 2) Anahtarlar: k‐inci key = bir sonraki alt ağacın en küçük key’i
+            for (size_t k = 1; k < end - start; k++) {
+                BPNode *child = level[start + k];
+                // leaf ise keys[0], internal ise children[0]->keys[0]
+                char *splitKey = child->is_leaf
+                    ? child->keys[0]
+                    : child->children[0]->keys[0];
+                node->keys[k-1] = key_dup(splitKey);
+            }
+
+            // 3) num_keys = çocuk sayısı – 1
+            node->num_keys = (int)(end - start) - 1;
+            nextLvl[i]     = node;
         }
         free(level);
-        level = nextLvl;
+        level    = nextLvl;
         lvlCount = newCount;
     }
 
     // Aşama 4: Kök
     *root = level[0];
     free(level);
+
+    // (Opsiyonel) “Fizik” debug kontrolu
+    {
+        const char *dept = "Fizik";
+        BPNode *leaf = find_leaf(*root, dept);
+        if (leaf) {
+            printf("[DEBUG] LeafKeys (%zu):\n", leaf->num_keys);
+            for (int i = 0; i < leaf->num_keys; i++)
+                printf("  key[%d] = '%s'\n", i, leaf->keys[i]);
+        }
+    }
 }
 
 UniListNode *search(BPNode *root, const char *dept, int k) {

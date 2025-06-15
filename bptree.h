@@ -33,5 +33,4 @@ void bulk_load(BPNode **root, Record *recs, size_t n);
 UniListNode *search(BPNode *root, const char *dept, int k);
 int tree_height(BPNode *root);
 void destroy_tree(BPNode *root);
-
 #endif // BPTREE_H

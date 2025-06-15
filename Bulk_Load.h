@@ -23,7 +23,4 @@ Node* createNode(int isLeaf);
 // Pretty‐print the tree, indenting by level
 void printTree(Node* node, int level);
 
-// Build a B+ tree bottom‐up from the sorted array 'keys' of length 'n'
-void bulkLoad(int keys[], int n);
-
 #endif // BULK_LOAD_H

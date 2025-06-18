@@ -30,13 +30,14 @@ Metrics such as build time, split count, memory usage, tree height, and search t
 ## Compilation
 
 ```bash
-gcc -std=c11 -D_POSIX_C_SOURCE=199309L -Wall -Wextra -pedantic -g *.c -o bptree
+gcc -std=c11 -D_XOPEN_SOURCE=700 -Wall -Wextra -g \
+    record.c bptree.c external_sort.c main.c -o bptree
 ```
 
 ## Usage
 
 ```bash
-./bptree [csv_file]
+./bptree <csv_file> <1|2> <order>
 ```
 
 - `csv_file`: The CSV file to process (default is `yok_atlas.csv`)
@@ -51,22 +52,22 @@ Program flow:
 ## Example
 
 ```
-./bptree yok_atlas.csv
-Select B+ Tree load method:
-  1) Sequential Insertion
-  2) Bottom-up Bulk Load
-Enter choice (1 or 2): 2
+./bptree yok_atlas.csv 2 4
+External sort complete. Sorted file: sorted.csv
+Read 7006 records from sorted.csv
+
 
 [Bottom-up Bulk Load]
-Build Time   : 0.001110 s
+Build Time   : 0.001141 s
 Tree Height  : 5
 Split Count  : 0
-Memory Usage : 392444 bytes
+Memory Usage : 388087 bytes
 
-Enter department name (exact): Physics
-Enter rank k (1-based): 4
-4th university in "Physics": MIDDLE EAST TECHNICAL UNIVERSITY (495.68)
-Search Time  : 0.00000527 s
+Enter department name (exact): Bilgisayar Muhendisligi
+Enter rank k (1-based): 21
+
+21th university in "Bilgisayar Muhendisligi": DOKUZ EYLUL UNIVERSITESI (507.33)
+Search Time  : 0.000003887 s
 ```
 
 ## Notes
